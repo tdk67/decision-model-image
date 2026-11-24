@@ -1,5 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import type { AppConfig } from "./config.js";
+import { sanitizeError } from "./security.js";
 
 export interface BoundingBox {
   index: number;
@@ -18,6 +19,13 @@ export interface LocalizationResult {
 export interface DecisionResult {
   latencyMs: number;
   scores: Record<string, number>;
+}
+
+export interface KeyValidationResult {
+  valid: boolean;
+  provider: "gemini" | "jev";
+  model: string;
+  detail: string;
 }
 
 const BOX_SCHEMA = {
@@ -46,22 +54,11 @@ const BOX_SCHEMA = {
 };
 
 export class TrafficSignService {
-  private readonly interactionAi: GoogleGenAI;
-  private readonly decisionAi: GoogleGenAI;
   private readonly config: AppConfig;
   private readonly questions: Record<string, Record<string, unknown>>;
 
   constructor(config: AppConfig) {
     this.config = config;
-    this.interactionAi = new GoogleGenAI({
-      apiKey: config.gemini.apiKey,
-      apiVersion: config.gemini.decisionApiVersion,
-    });
-    this.decisionAi = new GoogleGenAI({
-      apiKey: config.gemini.apiKey,
-      apiVersion: config.gemini.decisionApiVersion,
-    });
-
     const q: Record<string, Record<string, unknown>> = {};
     for (const sign of config.signs) {
       q[`sign_${sign.id}`] = {
@@ -72,11 +69,49 @@ export class TrafficSignService {
     this.questions = q;
   }
 
-  async detectBoundaries(data: Buffer, mimeType: string): Promise<LocalizationResult> {
+  private createClient(apiKey: string): GoogleGenAI {
+    return new GoogleGenAI({
+      apiKey,
+      apiVersion: this.config.gemini.decisionApiVersion,
+    });
+  }
+
+  async validateKey(apiKey: string): Promise<KeyValidationResult> {
+    const modelLabel = `${this.config.gemini.localizationModel} + ${this.config.gemini.decisionModel}`;
+    try {
+      const ai = this.createClient(apiKey);
+      await ai.decisions.create({
+        model: this.config.gemini.decisionModel,
+        input: [{ type: "text", text: "ping" }],
+        questions: {
+          ok: {
+            type: "noul",
+            instructions: "Is this a connectivity check?",
+          },
+        } as never,
+      });
+      return {
+        valid: true,
+        provider: "gemini",
+        model: modelLabel,
+        detail: "Google Gemini API verified",
+      };
+    } catch (err: unknown) {
+      return {
+        valid: false,
+        provider: "gemini",
+        model: modelLabel,
+        detail: sanitizeError(err, apiKey),
+      };
+    }
+  }
+
+  async detectBoundaries(data: Buffer, mimeType: string, apiKey: string): Promise<LocalizationResult> {
     const start = performance.now();
     const b64 = data.toString("base64");
+    const ai = this.createClient(apiKey);
 
-    const interaction = await this.interactionAi.interactions.create({
+    const interaction = await ai.interactions.create({
       model: this.config.gemini.localizationModel,
       input: [
         {
@@ -113,11 +148,12 @@ export class TrafficSignService {
     return { latencyMs, boxes };
   }
 
-  async classifySignsNoul(data: Buffer, mimeType: string): Promise<DecisionResult> {
+  async classifySignsNoul(data: Buffer, mimeType: string, apiKey: string): Promise<DecisionResult> {
     const start = performance.now();
     const b64 = data.toString("base64");
+    const ai = this.createClient(apiKey);
 
-    const result = await this.decisionAi.decisions.create({
+    const result = await ai.decisions.create({
       model: this.config.gemini.decisionModel,
       input: [
         {
@@ -141,4 +177,3 @@ export class TrafficSignService {
     return { latencyMs, scores };
   }
 }
-

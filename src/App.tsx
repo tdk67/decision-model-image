@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
-import type { AnalyzeResponse, BoundingBox, DecisionResult, SignDefinition } from "./types";
-
-type ProviderId = "gemini" | "jev";
+import { ApiKeyPanel } from "./components/ApiKeyPanel";
+import { clearSavedKey, loadSavedKeys, saveValidatedKey } from "./keyStore";
+import type {
+  AnalyzeResponse,
+  BoundingBox,
+  DecisionResult,
+  ProviderId,
+  SavedCredential,
+  SignDefinition,
+} from "./types";
 
 async function cropBoxToBlob(imageUrl: string, box: BoundingBox): Promise<Blob> {
   const img = new Image();
@@ -46,6 +53,19 @@ export function App() {
   const [loading, setLoading] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [locLatency, setLocLatency] = useState<number | null>(null);
+  const [savedKeys, setSavedKeys] = useState<Partial<Record<ProviderId, SavedCredential>>>({});
+  const [showKeyPanel, setShowKeyPanel] = useState<boolean>(false);
+
+  useEffect(() => {
+    void loadSavedKeys().then((keys) => {
+      setSavedKeys(keys);
+      if (!keys.gemini && !keys.jev) {
+        setShowKeyPanel(true);
+      } else if (!keys.gemini && keys.jev) {
+        setProvider("jev");
+      }
+    });
+  }, []);
 
   useEffect(() => {
     fetch("/api/taxonomy")
@@ -59,7 +79,23 @@ export function App() {
       .catch(() => setErrorMsg("Failed to load traffic sign taxonomy from /api/taxonomy"));
   }, []);
 
-  const analyzeFile = async (file: File, activeProvider: ProviderId, localUrl: string) => {
+  const activeCred = savedKeys[provider] ?? null;
+
+  const analyzeFile = async (
+    file: File,
+    activeProvider: ProviderId,
+    localUrl: string,
+    credOverride?: SavedCredential | null
+  ) => {
+    const cred = credOverride ?? savedKeys[activeProvider];
+    if (!cred) {
+      setShowKeyPanel(true);
+      setErrorMsg(
+        `No validated ${activeProvider === "gemini" ? "Google Gemini" : "OpenRouter (Jev)"} API key saved. Enter your key above first.`
+      );
+      return;
+    }
+
     setBoxes([]);
     setWholeResult(null);
     setCropResults(new Map());
@@ -67,11 +103,19 @@ export function App() {
     setErrorMsg(null);
     setLoading(true);
 
+    const authHeaders = {
+      "X-Provider": activeProvider,
+      "X-API-Key": cred.apiKey,
+    };
+
     try {
       const form = new FormData();
       form.append("image", file);
-      form.append("provider", activeProvider);
-      const resp = await fetch("/api/analyze", { method: "POST", body: form });
+      const resp = await fetch("/api/analyze", {
+        method: "POST",
+        headers: authHeaders,
+        body: form,
+      });
       const data = (await resp.json()) as AnalyzeResponse & { error?: string };
       if (!resp.ok) {
         throw new Error(data.error || `Analyze failed (${resp.status})`);
@@ -87,8 +131,11 @@ export function App() {
           const blob = await cropBoxToBlob(localUrl, box);
           const cropForm = new FormData();
           cropForm.append("image", blob, `crop_${box.index}.png`);
-          cropForm.append("provider", activeProvider);
-          const cropResp = await fetch("/api/classify-crop", { method: "POST", body: cropForm });
+          const cropResp = await fetch("/api/classify-crop", {
+            method: "POST",
+            headers: authHeaders,
+            body: cropForm,
+          });
           if (!cropResp.ok) return;
           const cropData = (await cropResp.json()) as DecisionResult;
           setCropResults((prev) => {
@@ -114,8 +161,37 @@ export function App() {
 
   const handleProviderChange = async (nextProvider: ProviderId) => {
     setProvider(nextProvider);
+    setErrorMsg(null);
+    const cred = savedKeys[nextProvider];
+    if (!cred) {
+      setShowKeyPanel(true);
+      return;
+    }
     if (uploadedFile && imageUrl) {
-      await analyzeFile(uploadedFile, nextProvider, imageUrl);
+      await analyzeFile(uploadedFile, nextProvider, imageUrl, cred);
+    }
+  };
+
+  const handleKeyValidated = async (cred: SavedCredential) => {
+    await saveValidatedKey(cred);
+    setSavedKeys((prev) => ({ ...prev, [cred.provider]: cred }));
+    setProvider(cred.provider);
+    setShowKeyPanel(false);
+    setErrorMsg(null);
+    if (uploadedFile && imageUrl) {
+      await analyzeFile(uploadedFile, cred.provider, imageUrl, cred);
+    }
+  };
+
+  const handleClearKey = async (targetProvider: ProviderId) => {
+    await clearSavedKey(targetProvider);
+    setSavedKeys((prev) => {
+      const next = { ...prev };
+      delete next[targetProvider];
+      return next;
+    });
+    if (targetProvider === provider) {
+      setShowKeyPanel(true);
     }
   };
 
@@ -177,6 +253,16 @@ export function App() {
 
       {errorMsg && <div class="error-banner">{errorMsg}</div>}
 
+      {(showKeyPanel || !activeCred) && (
+        <ApiKeyPanel
+          activeProvider={provider}
+          savedKeys={savedKeys}
+          onValidated={handleKeyValidated}
+          onClear={handleClearKey}
+          onClose={() => setShowKeyPanel(false)}
+        />
+      )}
+
       <section class="card toolbar">
         <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "center" }}>
           <label class="btn">
@@ -197,14 +283,21 @@ export function App() {
             class={`btn secondary ${provider === "gemini" ? "active" : ""}`}
             onClick={() => void handleProviderChange("gemini")}
           >
-            Gemini (H4 + D1)
+            Gemini (H4 + D1) {savedKeys.gemini ? "✓" : ""}
           </button>
           <button
             type="button"
             class={`btn secondary ${provider === "jev" ? "active" : ""}`}
             onClick={() => void handleProviderChange("jev")}
           >
-            Jev 1.14 (OpenRouter)
+            Jev 1.14 (OpenRouter) {savedKeys.jev ? "✓" : ""}
+          </button>
+          <button
+            type="button"
+            class="btn secondary"
+            onClick={() => setShowKeyPanel((v) => !v)}
+          >
+            {activeCred ? `API Key (${activeCred.maskedKey})` : "Set API Key"}
           </button>
         </div>
 

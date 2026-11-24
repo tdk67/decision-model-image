@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import dotenv from "dotenv";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const PROJECT_ROOT = path.resolve(__dirname, "..");
@@ -14,13 +13,11 @@ export interface SignDefinition {
 
 export interface AppConfig {
   gemini: {
-    apiKey: string;
     localizationModel: string;
     decisionModel: string;
     decisionApiVersion: string;
   };
   openrouter: {
-    apiKey: string | null;
     model: string;
     decisionsUrl: string;
     timeoutSec: number;
@@ -40,8 +37,6 @@ function requireField<T>(obj: Record<string, unknown>, key: string, section: str
 }
 
 export function loadConfig(): AppConfig {
-  dotenv.config({ path: path.join(PROJECT_ROOT, ".env") });
-
   const configPath = path.join(PROJECT_ROOT, "config.json");
   if (!fs.existsSync(configPath)) {
     throw new Error(`Configuration file not found: ${configPath}`);
@@ -51,12 +46,6 @@ export function loadConfig(): AppConfig {
   const oRaw = requireField<Record<string, unknown>>(raw, "openrouter", "root");
   const uRaw = requireField<Record<string, unknown>>(raw, "ui", "root");
 
-  const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error("Missing GOOGLE_API_KEY or GEMINI_API_KEY in .env");
-  }
-  const openRouterKey = process.env.OPEN_ROUTER_API_KEY || process.env.OPENROUTER_API_KEY || null;
-
   const signsPath = path.join(PROJECT_ROOT, "data", "traffic_signs.json");
   if (!fs.existsSync(signsPath)) {
     throw new Error(`Traffic signs taxonomy not found: ${signsPath}`);
@@ -65,13 +54,11 @@ export function loadConfig(): AppConfig {
 
   return {
     gemini: {
-      apiKey,
       localizationModel: requireField<string>(gRaw, "localization_model", "gemini"),
       decisionModel: requireField<string>(gRaw, "decision_model", "gemini"),
       decisionApiVersion: requireField<string>(gRaw, "decision_api_version", "gemini"),
     },
     openrouter: {
-      apiKey: openRouterKey,
       model: requireField<string>(oRaw, "model", "openrouter"),
       decisionsUrl: requireField<string>(oRaw, "decisions_url", "openrouter"),
       timeoutSec: Number(requireField<number>(oRaw, "timeout_sec", "openrouter")),

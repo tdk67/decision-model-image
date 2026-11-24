@@ -1,5 +1,11 @@
 import type { AppConfig } from "./config.js";
-import type { BoundingBox, DecisionResult, LocalizationResult } from "./trafficSignService.js";
+import { sanitizeError } from "./security.js";
+import type {
+  BoundingBox,
+  DecisionResult,
+  KeyValidationResult,
+  LocalizationResult,
+} from "./trafficSignService.js";
 
 interface OpenRouterDecisionResponse {
   answers?: Record<
@@ -11,6 +17,14 @@ interface OpenRouterDecisionResponse {
       confidence?: number;
     }
   >;
+}
+
+interface OpenRouterKeyInfoResponse {
+  data?: {
+    limit_remaining?: number | null;
+    is_free_tier?: boolean;
+  };
+  error?: { message?: string };
 }
 
 export class JevSignService {
@@ -29,14 +43,50 @@ export class JevSignService {
     this.noulQuestions = q;
   }
 
+  async validateKey(apiKey: string): Promise<KeyValidationResult> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), Math.min(10_000, this.config.openrouter.timeoutSec * 1000));
+    try {
+      const resp = await fetch("https://openrouter.ai/api/v1/key", {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+        },
+        signal: controller.signal,
+      });
+      const body = (await resp.json().catch(() => ({}))) as OpenRouterKeyInfoResponse;
+      if (!resp.ok || body.error) {
+        throw new Error(body.error?.message || `OpenRouter HTTP ${resp.status}`);
+      }
+      const remaining = body.data?.limit_remaining;
+      const detail =
+        typeof remaining === "number"
+          ? `OpenRouter verified ($${remaining.toFixed(2)} remaining)`
+          : "OpenRouter API verified";
+      return {
+        valid: true,
+        provider: "jev",
+        model: this.config.openrouter.model,
+        detail,
+      };
+    } catch (err: unknown) {
+      return {
+        valid: false,
+        provider: "jev",
+        model: this.config.openrouter.model,
+        detail: sanitizeError(err, apiKey),
+      };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   private async callDecisions(
     data: Buffer,
     mimeType: string,
-    questions: Record<string, Record<string, unknown>>
+    questions: Record<string, Record<string, unknown>>,
+    apiKey: string
   ): Promise<OpenRouterDecisionResponse> {
-    if (!this.config.openrouter.apiKey) {
-      throw new Error("Missing OPEN_ROUTER_API_KEY (or OPENROUTER_API_KEY) in .env");
-    }
     const b64 = data.toString("base64");
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.config.openrouter.timeoutSec * 1000);
@@ -44,7 +94,7 @@ export class JevSignService {
       const resp = await fetch(this.config.openrouter.decisionsUrl, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${this.config.openrouter.apiKey}`,
+          Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
           "TypeSafe-Danger-Zone-Images": "true",
         },
@@ -69,9 +119,9 @@ export class JevSignService {
     }
   }
 
-  async classifySignsNoul(data: Buffer, mimeType: string): Promise<DecisionResult> {
+  async classifySignsNoul(data: Buffer, mimeType: string, apiKey: string): Promise<DecisionResult> {
     const start = performance.now();
-    const resp = await this.callDecisions(data, mimeType, this.noulQuestions);
+    const resp = await this.callDecisions(data, mimeType, this.noulQuestions, apiKey);
     const latencyMs = Math.round(performance.now() - start);
 
     const scores: Record<string, number> = {};
@@ -87,9 +137,10 @@ export class JevSignService {
 
   async analyzeWithBoxes(
     data: Buffer,
-    mimeType: string
+    mimeType: string,
+    apiKey: string
   ): Promise<{ localization: LocalizationResult; wholeImage: DecisionResult }> {
-    const wholeImage = await this.classifySignsNoul(data, mimeType);
+    const wholeImage = await this.classifySignsNoul(data, mimeType, apiKey);
     const candidates = this.config.signs.filter((s) => (wholeImage.scores[s.id] ?? 0) >= 0.45);
 
     const boxes: BoundingBox[] = [];
@@ -104,7 +155,7 @@ export class JevSignService {
         };
       }
       const start = performance.now();
-      const boxResp = await this.callDecisions(data, mimeType, boxQuestions);
+      const boxResp = await this.callDecisions(data, mimeType, boxQuestions, apiKey);
       locLatencyMs = Math.round(performance.now() - start);
       const answers = boxResp.answers ?? {};
       candidates.forEach((s) => {
@@ -128,4 +179,3 @@ export class JevSignService {
     };
   }
 }
-

@@ -81,26 +81,24 @@ Google's `gemini-decision-1` (`decisions.create`) currently only supports decisi
 ### Prerequisites
 
 - **Node.js** 18+ and `npm`
-- **Google Gemini API key** (`GOOGLE_API_KEY` or `GEMINI_API_KEY`) — required
-- **OpenRouter API key** (`OPEN_ROUTER_API_KEY` or `OPENROUTER_API_KEY`) — optional, enables the **Jev 1.14 (OpenRouter)** provider
+- **Your own API key (BYOK):**
+  - A **Google Gemini API key** (`AIza...`) for **Gemini (H4 + D1)**, and/or
+  - An **OpenRouter API key** (`sk-or-v1-...`) for **Jev 1.14 (OpenRouter)**
+
+### Security & BYOK Design
+
+- **Zero Server-Side Key Storage:** The Express server (`server/`) never reads `.env` or stores API keys. Every `/api/validate-key`, `/api/analyze`, and `/api/classify-crop` request requires `X-Provider` (`gemini` | `jev`) and `X-API-Key` headers (query-string keys are rejected with `HTTP 400`).
+- **Browser-Only Key Persistence:** Validated keys are stored locally in your browser's **IndexedDB** (`traffic-sign-categorizer-byok`) and can be removed anytime via **Forget Key**.
+- **Error Scrubbing & Security Headers:** Upstream errors scrub `AIza...`, `sk-or-v1-...`, `Bearer` tokens, and raw keys before reaching clients; responses include `CSP`, `X-Frame-Options: DENY`, and `Cache-Control: no-store` on `/api/*`.
 
 ### Setup
 
-1. Install dependencies:
+```powershell
+cd traffic-sign-categorizer
+npm install
+```
 
-   ```powershell
-   cd traffic-sign-categorizer
-   npm install
-   ```
-
-2. Create a `.env` file in the `traffic-sign-categorizer/` root with your API keys:
-
-   ```env
-   GOOGLE_API_KEY=your_gemini_api_key
-   OPEN_ROUTER_API_KEY=your_openrouter_api_key
-   ```
-
-3. Review [`config.json`](config.json) if you want to adjust model IDs, OpenRouter timeout, or the default UI confidence threshold (`default_threshold_pct`).
+Review [`config.json`](config.json) if you want to adjust model IDs, OpenRouter timeout, or the default UI confidence threshold (`default_threshold_pct`). No `.env` file is required.
 
 ### Running the App
 
@@ -114,7 +112,7 @@ npm run server
 npm run dev
 ```
 
-Open `http://localhost:5174`, upload a street/traffic-sign image, select **Gemini (H4 + D1)** or **Jev 1.14 (OpenRouter)**, and click detected bounding boxes to crop and re-classify individual signs.
+Open `http://localhost:5174`, enter and validate your Gemini and/or OpenRouter API key in the **Bring Your Own Key (BYOK)** panel, upload a street/traffic-sign image, and click detected bounding boxes to crop and re-classify individual signs.
 
 ### Typecheck & Production Build
 
