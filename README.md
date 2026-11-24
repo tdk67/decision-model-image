@@ -26,13 +26,13 @@ Google's implementation runs **two separate models in parallel** (`Promise.all` 
 3. **Crop Re-classification:** The Preact UI crops any detected box on a canvas and posts it to `POST /api/classify-crop`, running `gemini-decision-1` again on the isolated sign.
 
 ```mermaid
-flowchart LR
-    Img["Uploaded Image"] --> API["Express Server /api/analyze"]
+flowchart TD
+    Img["Uploaded Image"] --> API["Express /api/analyze"]
     API -->|"Parallel: interactions.create + BOX_SCHEMA"| H4["gemini-4-hydrogen"]
-    API -->|"Parallel: decisions.create (107 noul questions)"| D1["gemini-decision-1"]
-    H4 -->|"Bounding boxes [0..1000]"| UI["Preact UI"]
-    D1 -->|"Calibrated scores [0..1]"| UI
-    UI -->|"Crop selected box -> /api/classify-crop"| D1
+    API -->|"Parallel: decisions.create, 107 noul"| D1["gemini-decision-1"]
+    H4 -->|"Boxes 0-1000"| UI["Preact UI"]
+    D1 -->|"Scores 0-1"| UI
+    UI -->|"Crop box to /api/classify-crop"| D1
 ```
 
 ### Jev 1.14 Pipeline (`JevSignService`)
@@ -43,15 +43,17 @@ Jev's implementation uses **a single model** (`typesafe/jev-1.14`) via OpenRoute
 2. **Localization (`type: "box"`):** Filters candidate signs with `score >= 0.45`, then sends a second `/alpha/decisions` request containing `type: "box"` questions (`"Locate <sign.prompt>"`) for those candidates. Jev returns `{ top, left, bottom, right }` in `[0..1]`, which the server scales to `[0..1000]`.
 3. **Crop Re-classification:** Sends any user-selected crop to `POST /api/classify-crop`, running the same `type: "noul"` pass on the cropped image.
 
+**Why two sequential calls instead of one?** Sending all 107 `noul` + 107 `box` questions (214 total) in the first request would force Jev to compute bounding boxes for ~100+ absent signs, inflating payload size and latency. Filtering by `score >= 0.45` first limits `box` queries to likely candidates and avoids noisy boxes for non-present classes.
+
 ```mermaid
-flowchart LR
-    Img["Uploaded Image"] --> API["Express Server /api/analyze"]
-    API -->|"Step 1: 107 noul questions"| Jev1["typesafe/jev-1.14 (/alpha/decisions)"]
-    Jev1 -->|"Scores >= 0.45"| Filter["Candidate Filter"]
-    Filter -->|"Step 2: box questions for candidates"| Jev2["typesafe/jev-1.14 (/alpha/decisions)"]
-    Jev1 -->|"Calibrated scores [0..1]"| UI["Preact UI"]
-    Jev2 -->|"Native box {top,left,bottom,right}"| UI
-    UI -->|"Crop selected box -> /api/classify-crop"| Jev1
+flowchart TD
+    Img["Uploaded Image"] --> API["Express /api/analyze"]
+    API -->|"Step 1: 107 noul questions"| Jev1["typesafe/jev-1.14 /alpha/decisions"]
+    Jev1 -->|"Scores at least 0.45"| Filter["Candidate Filter"]
+    Jev1 -->|"Scores 0-1"| UI["Preact UI"]
+    Filter -->|"Step 2: box questions"| Jev2["typesafe/jev-1.14 /alpha/decisions"]
+    Jev2 -->|"Native box coords"| UI
+    UI -->|"Crop box to /api/classify-crop"| Jev1
 ```
 
 ---
