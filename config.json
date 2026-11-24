@@ -1,0 +1,15 @@
+{
+  "gemini": {
+    "localization_model": "gemini-4-hydrogen",
+    "decision_model": "gemini-decision-1",
+    "decision_api_version": "v1beta"
+  },
+  "openrouter": {
+    "model": "typesafe/jev-1.14",
+    "decisions_url": "https://openrouter.ai/api/alpha/decisions",
+    "timeout_sec": 30.0
+  },
+  "ui": {
+    "default_threshold_pct": 50
+  }
+}

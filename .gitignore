@@ -1,0 +1,43 @@
+# Secrets & certificates
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+build/
+
+# Node / Web
+node_modules/
+dist/
+.vite/
+coverage/
+*.tsbuildinfo
+*.log
+
+# Sample / uploaded audio & media files
+*.mp3
+*.wav
+*.webm
+*.ogg
+*.flac
+*.m4a
+*.aac
+*.opus
+
+# OS & editor files
+desktop.ini
+Thumbs.db
+.DS_Store
+.vscode/
+.idea/
+*.swp
