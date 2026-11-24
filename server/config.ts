@@ -41,7 +41,6 @@ function requireField<T>(obj: Record<string, unknown>, key: string, section: str
 
 export function loadConfig(): AppConfig {
   dotenv.config({ path: path.join(PROJECT_ROOT, ".env") });
-  dotenv.config({ path: path.join(PROJECT_ROOT, "..", ".env") });
 
   const configPath = path.join(PROJECT_ROOT, "config.json");
   if (!fs.existsSync(configPath)) {

@@ -93,7 +93,7 @@ Google's `gemini-decision-1` (`decisions.create`) currently only supports decisi
    npm install
    ```
 
-2. Create a `.env` file in `traffic-sign-categorizer/` (or in the parent repository root) with your API keys:
+2. Create a `.env` file in the `traffic-sign-categorizer/` root with your API keys:
 
    ```env
    GOOGLE_API_KEY=your_gemini_api_key
