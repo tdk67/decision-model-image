@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import express from "express";
 import multer from "multer";
 import { loadConfig } from "./config.js";
@@ -108,7 +111,18 @@ app.post("/api/classify-crop", upload.single("image"), async (req, res) => {
   }
 });
 
+// Serve the built Vite/Preact frontend (SPA) when present (production).
+const __filenamedir = path.dirname(fileURLToPath(import.meta.url));
+const distDir = path.resolve(__filenamedir, "..", "dist");
+if (fs.existsSync(path.join(distDir, "index.html"))) {
+  app.use(express.static(distDir));
+  app.get(/^\/(?!api\/).*/, (_req, res) => {
+    res.sendFile(path.join(distDir, "index.html"));
+  });
+}
+
 const PORT = Number(process.env.PORT || 3002);
-app.listen(PORT, () => {
-  console.log(`Traffic Sign Categorizer server listening on http://localhost:${PORT} (BYOK mode)`);
+const HOST = process.env.HOST || "0.0.0.0";
+app.listen(PORT, HOST, () => {
+  console.log(`Traffic Sign Categorizer server listening on http://${HOST}:${PORT} (BYOK mode)`);
 });
